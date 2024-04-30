@@ -1,0 +1,18 @@
+[package]
+name = "rustynes"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["lib"]
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bitflags = "2.5.0"
+hashbrown = "0.14.3"
+libc-print = "0.1.23"
+
+[dev-dependencies]
+minifb = "0.25"
+cpal = "0.15.3"
+fundsp = "0.17.1"
