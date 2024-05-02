@@ -9,7 +9,7 @@ pub trait Hardware {
     fn draw_framebuffer(&mut self, frame_buffer: &Frame);
     fn pad_p1(&mut self) -> JoypadButton;
     fn pad_p2(&mut self) -> JoypadButton;
-    fn play_sound(&mut self, sound: [Tone; 3]);
+    fn play_sound(&mut self, sound: [Tone; 4]);
 }
 
 pub struct HardwareHandle(Rc<RefCell<dyn Hardware>>);

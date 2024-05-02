@@ -8,7 +8,7 @@ extern crate alloc;
 use alloc::vec::Vec;
 use apu::Apu;
 pub use cartrige::Rom;
-use cpu::{Cpu2A03, Instruction, OpCode};
+use cpu::{Cpu2A03, Instruction};
 use device::Device;
 use hardware::HardwareHandle;
 use joypad::Joypad;

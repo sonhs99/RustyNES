@@ -1,3 +1,8 @@
+pub const LENGTH_COUNTER_TABLE: [u8; 0x20] = [
+    10, 254, 20, 2, 40, 4, 80, 6, 160, 8, 60, 10, 14, 12, 26, 14, 12, 16, 24, 18, 48, 20, 96, 22,
+    192, 24, 72, 26, 16, 28, 32, 30,
+];
+
 #[derive(Debug)]
 pub enum WaveForm {
     Pulse12,
@@ -5,6 +10,7 @@ pub enum WaveForm {
     Pulse50,
     Pusle75,
     Triangle,
+    Noise,
 }
 
 #[derive(Debug)]
@@ -64,7 +70,7 @@ impl Envelope {
         }
     }
 
-    pub fn get_value(&self) -> u8 {
+    pub fn value(&self) -> u8 {
         if self.constant {
             self.volume
         } else {
@@ -111,7 +117,7 @@ impl Sweep {
     }
 
     pub fn set_period(&mut self, period: u8) {
-        self.period = period;
+        self.period = period + 1;
     }
 
     pub fn set_negate(&mut self, negate: bool) {
@@ -129,7 +135,7 @@ impl Sweep {
         }
     }
 
-    pub fn mute(&self) -> bool {
+    pub fn is_mute(&self) -> bool {
         self.mute
     }
 
@@ -141,7 +147,7 @@ impl Sweep {
                     true => timer
                         .checked_sub(self.change + self.ext as u16)
                         .unwrap_or(0),
-                    false => timer.checked_add(self.change).unwrap_or(0),
+                    false => timer.checked_add(self.change).unwrap_or(u16::MAX),
                 }
             } else {
                 timer
@@ -161,5 +167,98 @@ impl Sweep {
 
     pub fn reset(&mut self) {
         self.reload_flag = true;
+    }
+}
+
+pub struct LengthCounter {
+    enable: bool,
+    length: u8,
+}
+
+impl LengthCounter {
+    pub fn new() -> Self {
+        Self {
+            enable: false,
+            length: 0,
+        }
+    }
+
+    pub fn set_enable(&mut self, flag: bool) {
+        self.enable = flag;
+    }
+
+    pub fn set_length(&mut self, length: u8) {
+        self.length = LENGTH_COUNTER_TABLE[length as usize];
+    }
+
+    pub fn disable(&mut self) {
+        self.enable = false;
+        self.length = 0;
+    }
+
+    pub fn is_mute(&self) -> bool {
+        !self.enable || self.length == 0
+    }
+
+    pub fn is_end(&self) -> bool {
+        self.length == 0
+    }
+
+    pub fn tick(&mut self) {
+        if self.length != 0 {
+            self.length -= 1;
+        }
+    }
+}
+
+pub struct Sequence {
+    sequence: u8,
+    sequence_counter: u8,
+    timer: u16,
+    timer_counter: u16,
+}
+
+impl Sequence {
+    pub fn new(sequence: u8) -> Self {
+        Self {
+            sequence,
+            sequence_counter: 0,
+            timer: 0,
+            timer_counter: 0,
+        }
+    }
+
+    pub fn set_timer_low(&mut self, value: u8) {
+        self.timer = self.timer & 0xFF00 | value as u16;
+    }
+
+    pub fn set_timer_high(&mut self, value: u8) {
+        self.timer = self.timer & 0x00FF | (value as u16) << 8;
+        self.timer_counter = self.timer;
+    }
+
+    pub fn tick(&mut self) {
+        if self.timer_counter == 0 {
+            self.timer_counter = self.timer;
+            self.sequence_counter = (self.sequence_counter + 1) % self.sequence;
+        } else {
+            self.timer_counter -= 1;
+        }
+    }
+
+    pub fn value(&self) -> u8 {
+        self.sequence_counter
+    }
+
+    pub fn period(&self) -> u16 {
+        self.timer
+    }
+
+    pub fn reset(&mut self) {
+        self.sequence_counter = 0;
+    }
+
+    pub fn is_mute(&self) -> bool {
+        self.timer < 8
     }
 }

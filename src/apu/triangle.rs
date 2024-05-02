@@ -1,68 +1,124 @@
+use libc_print::libc_println;
+
 use super::util::*;
-use super::{CPU_CLOCK, LENGTH_COUNTER_TABLE};
+use super::TimeEvent;
+use super::CPU_CLOCK;
+
+pub struct LinearCounter {
+    enable: bool,
+    reload: bool,
+    reload_value: u8,
+    counter: u8,
+}
+
+impl LinearCounter {
+    pub fn new() -> Self {
+        Self {
+            enable: false,
+            reload: false,
+            reload_value: 0,
+            counter: 0,
+        }
+    }
+
+    pub fn set_enable(&mut self, flag: bool) {
+        self.enable = flag;
+    }
+
+    pub fn set_counter(&mut self, counter: u8) {
+        self.reload_value = counter;
+    }
+
+    pub fn is_mute(&self) -> bool {
+        !self.enable || self.counter != 0
+    }
+
+    pub fn reset(&mut self) {
+        self.reload = true;
+    }
+
+    pub fn tick(&mut self) {
+        if self.reload {
+            self.reload = false;
+            self.counter = self.reload_value;
+        } else if self.counter != 0 {
+            self.counter -= 1;
+        }
+    }
+}
 
 pub struct Triangle {
     halt: bool,
-    linear: u8,
+    linear: LinearCounter,
 
-    timer: u16,
-    length: u8,
+    sequence: Sequence,
+    length: LengthCounter,
 }
 
 impl Triangle {
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             halt: false,
-            linear: 0,
+            linear: LinearCounter::new(),
 
-            timer: 0,
-            length: 0,
+            sequence: Sequence::new(32),
+            length: LengthCounter::new(),
         }
     }
 
     pub fn update_1(&mut self, value: u8) {
         self.halt = value & 0b1000_0000 != 0;
-        self.linear = value & 0b0111_1111;
+        self.linear.set_enable(!self.halt);
+        self.length.set_enable(!self.halt);
+        self.linear.set_counter(value & 0b0111_1111);
+        self.sequence.reset();
     }
 
-    pub fn update_2(&mut self, value: u8) {}
+    pub fn update_2(&mut self, _value: u8) {}
 
     pub fn update_3(&mut self, value: u8) {
-        self.timer = self.timer & 0xFF00 | value as u16;
+        self.sequence.set_timer_low(value);
     }
 
     pub fn update_4(&mut self, value: u8) {
-        self.length = LENGTH_COUNTER_TABLE[(value >> 3) as usize];
-        self.timer = self.timer & 0x00FF | (value & 0b0000_0111) as u16;
+        self.length.set_length(value >> 3);
+        self.sequence.set_timer_high(value & 0b0000_0111);
+        self.linear.reset();
     }
 
-    pub fn tick(&mut self, target_dev: u8) {
-        if target_dev & 0x02 != 0 {
-            if self.length != 0 && !self.halt {
-                self.length -= 1;
+    pub fn tick(&mut self, time_event: &TimeEvent) {
+        if time_event.contains(TimeEvent::APUClock) {
+            if !self.length.is_mute() && !self.linear.is_mute() {
+                self.sequence.tick();
             }
         }
-    }
-
-    pub fn is_muted(&self) -> bool {
-        self.length == 0
+        if time_event.contains(TimeEvent::QuarterFrame) {
+            self.linear.tick();
+        }
+        if time_event.contains(TimeEvent::HalfFrame) {
+            self.length.tick();
+        }
     }
 
     pub fn is_halt(&self) -> bool {
         self.halt
     }
 
+    pub fn is_end(&self) -> bool {
+        self.length.is_end()
+    }
+
     pub fn disable(&mut self) {
-        self.length = 0;
+        self.length.disable();
     }
 
     pub fn value(&self) -> Tone {
         Tone {
-            frequency: CPU_CLOCK / (32.0 * (self.timer as f64 + 1.0)),
-            volume: if self.halt || self.is_muted() {
+            frequency: CPU_CLOCK / (32.0 * (self.sequence.period() as f64 + 1.0)),
+            volume: if self.halt || self.length.is_mute() || self.sequence.is_mute() {
                 0.0
             } else {
-                ((self.linear >> 3) as f64 - 1.0) / 16.0
+                1.0
             },
             duty: WaveForm::Triangle,
         }

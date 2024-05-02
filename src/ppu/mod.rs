@@ -62,10 +62,6 @@ impl Rect {
     pub fn is_inside(&self, x: usize, y: usize) -> bool {
         x >= self.x1 && x < self.x2 && y >= self.y1 && y < self.y2
     }
-
-    pub fn size(&self) -> usize {
-        (self.x2 - self.x1) * (self.y2 - self.y1)
-    }
 }
 
 impl Ppu {

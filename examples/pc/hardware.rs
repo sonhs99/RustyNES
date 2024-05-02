@@ -1,4 +1,3 @@
-use std::sync::{Arc, Mutex};
 use std::thread::spawn;
 use std::time::Duration;
 
@@ -10,71 +9,15 @@ use fundsp::hacker::*;
 use minifb::{Key, Scale, Window, WindowOptions};
 use rustynes::{self, Frame, JoypadButton, Tone, WaveForm};
 
-pub static SYSTEM_PALLETE: [(u8, u8, u8); 64] = [
-    (0x80, 0x80, 0x80),
-    (0x00, 0x3D, 0xA6),
-    (0x00, 0x12, 0xB0),
-    (0x44, 0x00, 0x96),
-    (0xA1, 0x00, 0x5E),
-    (0xC7, 0x00, 0x28),
-    (0xBA, 0x06, 0x00),
-    (0x8C, 0x17, 0x00),
-    (0x5C, 0x2F, 0x00),
-    (0x10, 0x45, 0x00),
-    (0x05, 0x4A, 0x00),
-    (0x00, 0x47, 0x2E),
-    (0x00, 0x41, 0x66),
-    (0x00, 0x00, 0x00),
-    (0x05, 0x05, 0x05),
-    (0x05, 0x05, 0x05),
-    (0xC7, 0xC7, 0xC7),
-    (0x00, 0x77, 0xFF),
-    (0x21, 0x55, 0xFF),
-    (0x82, 0x37, 0xFA),
-    (0xEB, 0x2F, 0xB5),
-    (0xFF, 0x29, 0x50),
-    (0xFF, 0x22, 0x00),
-    (0xD6, 0x32, 0x00),
-    (0xC4, 0x62, 0x00),
-    (0x35, 0x80, 0x00),
-    (0x05, 0x8F, 0x00),
-    (0x00, 0x8A, 0x55),
-    (0x00, 0x99, 0xCC),
-    (0x21, 0x21, 0x21),
-    (0x09, 0x09, 0x09),
-    (0x09, 0x09, 0x09),
-    (0xFF, 0xFF, 0xFF),
-    (0x0F, 0xD7, 0xFF),
-    (0x69, 0xA2, 0xFF),
-    (0xD4, 0x80, 0xFF),
-    (0xFF, 0x45, 0xF3),
-    (0xFF, 0x61, 0x8B),
-    (0xFF, 0x88, 0x33),
-    (0xFF, 0x9C, 0x12),
-    (0xFA, 0xBC, 0x20),
-    (0x9F, 0xE3, 0x0E),
-    (0x2B, 0xF0, 0x35),
-    (0x0C, 0xF0, 0xA4),
-    (0x05, 0xFB, 0xFF),
-    (0x5E, 0x5E, 0x5E),
-    (0x0D, 0x0D, 0x0D),
-    (0x0D, 0x0D, 0x0D),
-    (0xFF, 0xFF, 0xFF),
-    (0xA6, 0xFC, 0xFF),
-    (0xB3, 0xEC, 0xFF),
-    (0xDA, 0xAB, 0xEB),
-    (0xFF, 0xA8, 0xF9),
-    (0xFF, 0xAB, 0xB3),
-    (0xFF, 0xD2, 0xB0),
-    (0xFF, 0xEF, 0xA6),
-    (0xFF, 0xF7, 0x9C),
-    (0xD7, 0xE8, 0x95),
-    (0xA6, 0xED, 0xAF),
-    (0xA2, 0xF2, 0xDA),
-    (0x99, 0xFF, 0xFC),
-    (0xDD, 0xDD, 0xDD),
-    (0x11, 0x11, 0x11),
-    (0x11, 0x11, 0x11),
+pub static SYSTEM_PALLETE: [u32; 64] = [
+    0xFF808080, 0xFF003DA6, 0xFF0012B0, 0xFF440096, 0xFFA1005E, 0xFFC70028, 0xFFBA0600, 0xFF8C1700,
+    0xFF5C2F00, 0xFF104500, 0xFF054A00, 0xFF00472E, 0xFF004166, 0xFF000000, 0xFF050505, 0xFF050505,
+    0xFFC7C7C7, 0xFF0077FF, 0xFF2155FF, 0xFF8237FA, 0xFFEB2FB5, 0xFFFF2950, 0xFFFF2200, 0xFFD63200,
+    0xFFC46200, 0xFF358000, 0xFF058F00, 0xFF008A55, 0xFF0099CC, 0xFF212121, 0xFF090909, 0xFF090909,
+    0xFFFFFFFF, 0xFF0FD7FF, 0xFF69A2FF, 0xFFD480FF, 0xFFFF45F3, 0xFFFF618B, 0xFFFF8833, 0xFFFF9C12,
+    0xFFFABC20, 0xFF9FE30E, 0xFF2BF035, 0xFF0CF0A4, 0xFF05FBFF, 0xFF5E5E5E, 0xFF0D0D0D, 0xFF0D0D0D,
+    0xFFFFFFFF, 0xFFA6FCFF, 0xFFB3ECFF, 0xFFDAABEB, 0xFFFFA8F9, 0xFFFFABB3, 0xFFFFD2B0, 0xFFFFEFA6,
+    0xFFFFF79C, 0xFFD7E895, 0xFFA6EDAF, 0xFFA2F2DA, 0xFF99FFFC, 0xFFDDDDDD, 0xFF111111, 0xFF111111,
 ];
 
 pub struct Hardware {
@@ -87,6 +30,8 @@ pub struct Hardware {
     ch2_duty: Shared<f64>,
     ch3_fr: Shared<f64>,
     ch3_vo: Shared<f64>,
+    ch4_fr: Shared<f64>,
+    ch4_vo: Shared<f64>,
     key_mapper: [(Key, JoypadButton); 8],
 }
 
@@ -114,8 +59,9 @@ impl Hardware {
         let ch2_duty = Shared::new(0.0);
         let ch3_fr = Shared::new(0.0);
         let ch3_vo = Shared::new(0.0);
+        let ch4_fr = Shared::new(0.0);
+        let ch4_vo = Shared::new(0.0);
 
-        let sound = Arc::new(Mutex::new(0.0f64));
         run_audio(
             ch1_fr.clone(),
             ch1_vo.clone(),
@@ -125,6 +71,8 @@ impl Hardware {
             ch2_duty.clone(),
             ch3_fr.clone(),
             ch3_vo.clone(),
+            ch4_fr.clone(),
+            ch4_vo.clone(),
         );
 
         Self {
@@ -137,6 +85,8 @@ impl Hardware {
             ch2_duty,
             ch3_fr,
             ch3_vo,
+            ch4_fr,
+            ch4_vo,
             key_mapper: [
                 (Key::Down, JoypadButton::Down),
                 (Key::Up, JoypadButton::Up),
@@ -159,9 +109,7 @@ impl rustynes::Hardware for Hardware {
     fn draw_framebuffer(&mut self, frame_buffer: &Frame) {
         let mut frame = [0u32; rustynes::WIDTH * rustynes::HEIGHT];
         for idx in 0..rustynes::WIDTH * rustynes::HEIGHT {
-            let color = SYSTEM_PALLETE[frame_buffer.data[idx] as usize];
-            frame[idx] =
-                0xFF000000 | (color.0 as u32) << 16 | (color.1 as u32) << 8 | color.2 as u32;
+            frame[idx] = SYSTEM_PALLETE[frame_buffer.data[idx] as usize];
         }
         self.window
             .update_with_buffer(&frame, rustynes::WIDTH, rustynes::HEIGHT)
@@ -180,7 +128,7 @@ impl rustynes::Hardware for Hardware {
         JoypadButton::from_bits_truncate(0x00)
     }
 
-    fn play_sound(&mut self, sound: [Tone; 3]) {
+    fn play_sound(&mut self, sound: [Tone; 4]) {
         self.ch1_fr.set_value(sound[0].frequency);
         self.ch1_vo.set_value(sound[0].volume);
         self.ch1_duty.set_value(match sound[0].duty {
@@ -189,6 +137,7 @@ impl rustynes::Hardware for Hardware {
             WaveForm::Pulse50 => 0.50,
             WaveForm::Pusle75 => 0.75,
             WaveForm::Triangle => todo!(),
+            WaveForm::Noise => todo!(),
         } as f64);
 
         self.ch2_fr.set_value(sound[1].frequency);
@@ -199,10 +148,14 @@ impl rustynes::Hardware for Hardware {
             WaveForm::Pulse50 => 0.50,
             WaveForm::Pusle75 => 0.75,
             WaveForm::Triangle => todo!(),
+            WaveForm::Noise => todo!(),
         } as f64);
 
-        // self.ch3_fr.set_value(sound[2].frequency);
-        // self.ch3_vo.set_value(1.0);
+        self.ch3_fr.set_value(sound[2].frequency);
+        self.ch3_vo.set_value(sound[2].volume);
+
+        // self.ch4_fr.set_value(sound[3].frequency);
+        // self.ch4_vo.set_value(sound[3].volume);
     }
 }
 
@@ -215,6 +168,8 @@ fn run_audio(
     ch2_duty: Shared<f64>,
     ch3_fr: Shared<f64>,
     ch3_vo: Shared<f64>,
+    ch4_fr: Shared<f64>,
+    ch4_vo: Shared<f64>,
 ) {
     spawn(move || {
         let host = cpal::default_host();
@@ -222,11 +177,16 @@ fn run_audio(
         let config = device.default_output_config().unwrap().config();
         let channel = config.channels as usize;
 
-        let ch1_mono = ((var(&ch1_fr) | var(&ch1_duty)) >> pulse()) * var(&ch1_vo) * constant(0.33);
-        let ch2_mono = ((var(&ch2_fr) | var(&ch2_duty)) >> pulse()) * var(&ch2_vo) * constant(0.33);
-        let ch3_mono = (var(&ch3_fr) >> triangle()) * var(&ch3_vo) * constant(0.33);
+        let ch1_mono = ((var(&ch1_fr) | var(&ch1_duty)) >> pulse()) * var(&ch1_vo) * constant(0.25);
+        let ch2_mono = ((var(&ch2_fr) | var(&ch2_duty)) >> pulse()) * var(&ch2_vo) * constant(0.25);
 
-        let mut total_mono = ch1_mono + ch2_mono + ch3_mono;
+        let ch3_mono = (var(&ch3_fr) >> triangle()) * var(&ch3_vo) * constant(0.25);
+        let ch4_mono = var(&ch4_vo) * constant(0.25);
+
+        let pulse_mono = ch1_mono + ch2_mono;
+        let tnd_mono = ch3_mono + ch4_mono;
+
+        let mut total_mono = pulse_mono + tnd_mono;
 
         let mut next_sample = move || total_mono.get_mono();
 
