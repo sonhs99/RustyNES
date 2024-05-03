@@ -3,6 +3,7 @@ use libc_print::libc_println;
 use super::util::*;
 use super::TimeEvent;
 use super::CPU_CLOCK;
+use super::PITCH_RATIO;
 
 pub struct LinearCounter {
     enable: bool,
@@ -114,7 +115,9 @@ impl Triangle {
 
     pub fn value(&self) -> Tone {
         Tone {
-            frequency: CPU_CLOCK / (32.0 * (self.sequence.period() as f64 + 1.0)),
+            frequency: CPU_CLOCK
+                / (32.0 * (self.sequence.period() as f64 + 1.0))
+                / PITCH_RATIO as f64,
             volume: if self.halt || self.length.is_mute() || self.sequence.is_mute() {
                 0.0
             } else {

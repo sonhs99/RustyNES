@@ -1,6 +1,8 @@
 use bitflags::bitflags;
 
-use crate::cartrige::Mirroring;
+use crate::cartridge::Mirroring;
+
+use super::TileSize;
 
 bitflags! {
     pub struct ControllRegister: u8 {
@@ -44,11 +46,11 @@ impl ControllRegister {
         }
     }
 
-    pub fn sprite_size(&self) -> u8 {
+    pub fn sprite_size(&self) -> TileSize {
         if !self.contains(ControllRegister::SPRITE_SIZE) {
-            8
+            TileSize::Tile8
         } else {
-            16
+            TileSize::Tile16
         }
     }
 

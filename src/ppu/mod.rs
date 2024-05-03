@@ -1,11 +1,11 @@
-use alloc::vec;
 use alloc::vec::Vec;
 use libc_print::libc_println;
 
 use crate::{
-    cartrige::Mirroring,
-    device::IOHandler,
+    cartridge::Mirroring,
+    device::{DevHandler, IOHandler},
     memory::{Bus, MemoryBus, MemoryRead, MemoryWrite},
+    Rom,
 };
 
 use self::{
@@ -20,8 +20,25 @@ mod mask;
 mod scroll;
 mod status;
 
+#[derive(Clone, Copy)]
+pub enum TileSize {
+    Tile8,
+    Tile16,
+}
+
+pub enum Tile {
+    Tile8(Vec<u8>),
+    Tile16(Vec<u8>),
+}
+
+pub trait PpuHandler {
+    fn tile(&self, idx: usize, size: TileSize) -> Tile;
+    fn read(&self, address: u16) -> MemoryRead;
+    fn write(&mut self, address: u16, value: u8) -> MemoryWrite;
+}
+
 pub struct Ppu {
-    pub chr_rom: Vec<u8>,
+    rom: DevHandler<Rom>,
     pub palette_table: [u8; 32],
     pub vram: [u8; 2048],
     pub oam_data: [u8; 256],
@@ -38,7 +55,6 @@ pub struct Ppu {
     cycles: usize,
     scanline: u16,
     nmi_interrupt: bool,
-    chr_ram: bool,
     dma_enable: bool,
 
     frame: Frame,
@@ -65,14 +81,14 @@ impl Rect {
 }
 
 impl Ppu {
-    #[cfg(test)]
-    pub fn new_empty_rom() -> Self {
-        Ppu::new(vec![0; 2048], Mirroring::Horizontal, false)
-    }
+    // #[cfg(test)]
+    // pub fn new_empty_rom() -> Self {
+    //     Ppu::new(vec![0; 2048], Mirroring::Horizontal, false)
+    // }
 
-    pub fn new(chr_rom: Vec<u8>, mirroring: Mirroring, chr_ram: bool) -> Self {
+    pub fn new(rom: DevHandler<Rom>, mirroring: Mirroring) -> Self {
         Self {
-            chr_rom,
+            rom,
             palette_table: [0; 32],
             vram: [0; 2048],
             oam_data: [0; 256],
@@ -88,7 +104,6 @@ impl Ppu {
             scanline: 0,
             nmi_interrupt: false,
             frame: Frame::new(),
-            chr_ram,
             dma_enable: false,
             frame_tick: false,
             ignore_nmi: false,
@@ -102,7 +117,10 @@ impl Ppu {
         match addr {
             0..0x2000 => {
                 let result = self.internal_data_buf;
-                self.internal_data_buf = self.chr_rom[addr as usize];
+                match <DevHandler<Rom> as PpuHandler>::read(&mut self.rom, addr) {
+                    MemoryRead::Value(value) => self.internal_data_buf = value,
+                    MemoryRead::Pass => {}
+                }
                 result
             }
             0x2000..0x3000 => {
@@ -125,10 +143,9 @@ impl Ppu {
 
         match addr {
             0..0x2000 => {
-                if self.chr_ram {
-                    self.chr_rom[addr as usize] = value;
-                } else {
-                    panic!("[PPU] Attempt to Write Read-Only Data");
+                let result = <DevHandler<Rom> as PpuHandler>::write(&mut self.rom, addr, value);
+                if let MemoryWrite::Block = result {
+                    panic!("[PPU] Attempt to Read-Only Space");
                 }
             }
             0x2000..0x3000 => self.vram[self.mirror_vram_addr(addr) as usize] = value,
@@ -255,7 +272,6 @@ impl Ppu {
             }
         }
         if self.mask_reg.contains(MaskRegister::SPRITE) {
-            // self.render_sprite(false);
             self.render_sprite(true);
         }
         &self.frame
@@ -269,64 +285,120 @@ impl Ppu {
             let tile_x = i % 32;
             let tile_y = i / 32;
             let tile_base = (background_bank + tile * 16) as usize;
-            let tile = &self.chr_rom[tile_base..=tile_base + 15];
+            let tile = self.rom.tile(tile_base, TileSize::Tile8);
 
             let palette = self.bg_palette(nametable_base, tile_x as usize, tile_y as usize);
 
-            for y in 0..8 {
-                let mut lower = tile[y];
-                let mut upper = tile[y + 8];
-                for x in (0..8).rev() {
-                    let color_idx = (upper & 1) << 1 | (lower & 1);
-                    upper = upper >> 1;
-                    lower = lower >> 1;
+            match tile {
+                Tile::Tile8(tile) => {
+                    for y in 0..8 {
+                        let mut lower = tile[y];
+                        let mut upper = tile[y + 8];
+                        for x in (0..8).rev() {
+                            let color_idx = (upper & 1) << 1 | (lower & 1);
+                            upper = upper >> 1;
+                            lower = lower >> 1;
 
-                    let color = palette[color_idx as usize];
-                    let pixel_x = tile_x as usize * 8 + x;
-                    let pixel_y = tile_y as usize * 8 + y;
+                            let color = palette[color_idx as usize];
+                            let pixel_x = tile_x as usize * 8 + x;
+                            let pixel_y = tile_y as usize * 8 + y;
 
-                    if color_idx != 0 && range.is_inside(pixel_x, pixel_y) {
-                        self.frame.set_pixel(
-                            (pixel_x as isize + offset_x) as usize,
-                            (pixel_y as isize + offset_y) as usize,
-                            color,
-                        );
+                            if color_idx != 0 && range.is_inside(pixel_x, pixel_y) {
+                                self.frame.set_pixel(
+                                    (pixel_x as isize + offset_x) as usize,
+                                    (pixel_y as isize + offset_y) as usize,
+                                    color,
+                                );
+                            }
+                        }
                     }
                 }
+                Tile::Tile16(_) => todo!(),
             }
         }
     }
 
     fn render_sprite(&mut self, priority: bool) {
         let sprite_bank = self.ctrl_reg.sprite_pattern_addr();
+        let tile_size = self.ctrl_reg.sprite_size();
+
         for sprite_idx in (0..self.oam_data.len()).step_by(4).rev() {
             let sprite_y = self.oam_data[sprite_idx];
             let tile_idx = self.oam_data[sprite_idx + 1] as u16;
             let sprite_attr = self.oam_data[sprite_idx + 2];
             let sprite_x = self.oam_data[sprite_idx + 3];
+
             if (sprite_attr & 0b0010_0000 == 0) == priority {
                 let horizontal_flip = sprite_attr & 0b0100_0000 != 0;
                 let vertical_flip = sprite_attr & 0b1000_0000 != 0;
 
-                let tile_base = (tile_idx * 16 + sprite_bank) as usize;
-                let tile = &self.chr_rom[tile_base..=tile_base + 15];
+                // let tile_base = (tile_idx * 16 + sprite_bank) as usize;
+                let tile_base = match tile_size {
+                    TileSize::Tile8 => (tile_idx << 4) + sprite_bank,
+                    TileSize::Tile16 => {
+                        let bank = (tile_idx & 0x01) * 0x1000;
+                        ((tile_idx & 0xFE) << 4) | bank
+                    }
+                } as usize;
+                let tile = self.rom.tile(tile_base, tile_size);
 
                 let palette_idx = sprite_attr & 0b0000_0011;
                 let palette = self.sprite_palette(palette_idx);
-                for y in 0..8 {
-                    let mut lower = tile[y];
-                    let mut upper = tile[y + 8];
-                    for x in (0..8).rev() {
-                        let color_idx = (upper & 1) << 1 | (lower & 1);
-                        upper = upper >> 1;
-                        lower = lower >> 1;
-                        if color_idx != 0 {
-                            let color = palette[color_idx as usize];
-                            self.frame.set_pixel(
-                                sprite_x as usize + if horizontal_flip { 7 - x } else { x },
-                                sprite_y as usize + if vertical_flip { 7 - y } else { y },
-                                color,
-                            )
+
+                match tile {
+                    Tile::Tile8(tile) => {
+                        for y in 0..8 {
+                            let mut lower = tile[y];
+                            let mut upper = tile[y + 8];
+                            for x in (0..8).rev() {
+                                let color_idx = (upper & 1) << 1 | (lower & 1);
+                                upper = upper >> 1;
+                                lower = lower >> 1;
+                                if color_idx != 0 {
+                                    let color = palette[color_idx as usize];
+                                    self.frame.set_pixel(
+                                        sprite_x as usize + if horizontal_flip { 7 - x } else { x },
+                                        sprite_y as usize + if vertical_flip { 7 - y } else { y },
+                                        color,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    Tile::Tile16(tile) => {
+                        for y in 0..8 {
+                            let mut lower = tile[y];
+                            let mut upper = tile[y + 8];
+                            for x in (0..8).rev() {
+                                let color_idx = (upper & 1) << 1 | (lower & 1);
+                                upper = upper >> 1;
+                                lower = lower >> 1;
+                                if color_idx != 0 {
+                                    let color = palette[color_idx as usize];
+                                    self.frame.set_pixel(
+                                        sprite_x as usize + if horizontal_flip { 7 - x } else { x },
+                                        sprite_y as usize + if vertical_flip { 7 - y } else { y },
+                                        color,
+                                    )
+                                }
+                            }
+                        }
+                        for y in 8..16 {
+                            let mut lower = tile[y + 8];
+                            let mut upper = tile[y + 16];
+                            for x in (0..8).rev() {
+                                let color_idx = (upper & 1) << 1 | (lower & 1);
+                                upper = upper >> 1;
+                                lower = lower >> 1;
+                                if color_idx != 0 {
+                                    let color = palette[color_idx as usize];
+                                    self.frame.set_pixel(
+                                        sprite_x as usize + if horizontal_flip { 7 - x } else { x },
+                                        sprite_y as usize + if vertical_flip { 15 - y } else { y },
+                                        color,
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -615,7 +687,7 @@ mod test {
 
     #[test]
     fn test_vram_vertical_mirror() {
-        let mut ppu = Ppu::new(vec![0; 2048], Mirroring::Vertical, false);
+        let mut ppu = Ppu::new(vec![0; 2048], Mirroring::Vertical);
 
         ppu.addr_reg.update(0x20);
         ppu.addr_reg.update(0x05);

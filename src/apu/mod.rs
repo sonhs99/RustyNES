@@ -13,7 +13,8 @@ mod pulse;
 mod triangle;
 mod util;
 
-const CLOCK_RATIO: usize = 2;
+const CLOCK_RATIO: usize = 1;
+const PITCH_RATIO: usize = 3;
 const CPU_CLOCK: f64 = 1789773.0 / CLOCK_RATIO as f64;
 
 bitflags! {

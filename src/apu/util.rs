@@ -131,7 +131,7 @@ impl Sweep {
     pub fn change(&mut self, timer: u16) {
         if self.enable {
             self.change = timer >> self.shift;
-            self.mute = timer < 8 || timer > 0x07FF;
+            self.mute = timer < 8 || timer + self.change > 0x07FF;
         }
     }
 

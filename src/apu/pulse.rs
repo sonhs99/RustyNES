@@ -1,7 +1,7 @@
 use libc_print::libc_println;
 
-use super::CPU_CLOCK;
 use super::{util::*, TimeEvent};
+use super::{CPU_CLOCK, PITCH_RATIO};
 
 pub struct Pulse {
     duty: usize,
@@ -93,12 +93,15 @@ impl Pulse {
             _ => unimplemented!(),
         };
         Tone {
-            frequency: CPU_CLOCK / (16.0 * (self.sequence.period() as f64 + 1.0)),
+            frequency: CPU_CLOCK
+                / (16.0 * (self.sequence.period() as f64 + 1.0))
+                / PITCH_RATIO as f64,
             volume: if self.halt
                 || self.sweep.is_mute()
                 || self.length.is_mute()
                 || self.sequence.is_mute()
             {
+                // libc_println!("{} {}", self.sweep.is_mute(), self.length.is_mute());
                 0.0
             } else {
                 (self.envelope.value() as f64) / 15.0

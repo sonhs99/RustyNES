@@ -5,9 +5,14 @@ use libc_print::libc_println;
 
 pub trait Bus {
     fn read_byte(&self, address: u16) -> u8;
-    fn read_word(&self, address: u16) -> u16;
+    fn read_word(&self, address: u16) -> u16 {
+        self.read_byte(address) as u16 | ((self.read_byte(address + 1) as u16) << 8)
+    }
     fn write_byte(&mut self, address: u16, value: u8);
-    fn write_word(&mut self, address: u16, value: u16);
+    fn write_word(&mut self, address: u16, value: u16) {
+        self.write_byte(address + 1, (value >> 8) as u8);
+        self.write_byte(address + 1, (value >> 8) as u8);
+    }
 }
 
 pub struct MemoryBus {
@@ -58,10 +63,6 @@ impl Bus for MemoryBus {
         }
     }
 
-    fn read_word(&self, address: u16) -> u16 {
-        self.read_byte(address) as u16 | ((self.read_byte(address + 1) as u16) << 8)
-    }
-
     fn write_byte(&mut self, address: u16, value: u8) {
         if let Some(handlers) = self.handlers.get(&address) {
             for handler in handlers {
@@ -80,11 +81,6 @@ impl Bus for MemoryBus {
         } else {
             self.memory[address as usize] = value;
         }
-    }
-
-    fn write_word(&mut self, address: u16, value: u16) {
-        self.write_byte(address, value as u8);
-        self.write_byte(address + 1, (value >> 8) as u8);
     }
 }
 

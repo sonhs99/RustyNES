@@ -2,7 +2,10 @@ use core::cell::{Ref, RefCell, RefMut};
 
 use alloc::rc::Rc;
 
-use crate::memory::{MemoryBus, MemoryHandler, MemoryRead, MemoryWrite};
+use crate::{
+    memory::{MemoryBus, MemoryHandler, MemoryRead, MemoryWrite},
+    ppu::{PpuHandler, Tile, TileSize},
+};
 
 pub struct Device<T>(Rc<RefCell<T>>, bool);
 
@@ -64,6 +67,29 @@ impl<T: IOHandler> MemoryHandler for DevHandler<T> {
                     panic!()
                 }
             }
+        }
+    }
+}
+
+impl<T: PpuHandler> PpuHandler for DevHandler<T> {
+    fn tile(&self, idx: usize, size: TileSize) -> Tile {
+        match self.0.try_borrow() {
+            Ok(inner) => inner.tile(idx, size),
+            Err(_) => panic!(),
+        }
+    }
+
+    fn read(&self, address: u16) -> MemoryRead {
+        match self.0.try_borrow() {
+            Ok(inner) => inner.read(address),
+            Err(_) => panic!(),
+        }
+    }
+
+    fn write(&mut self, address: u16, value: u8) -> MemoryWrite {
+        match self.0.try_borrow_mut() {
+            Ok(mut inner) => inner.write(address, value),
+            Err(_) => panic!(),
         }
     }
 }

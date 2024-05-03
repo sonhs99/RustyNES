@@ -1,16 +1,29 @@
-use alloc::vec;
+mod mmc1;
+mod nrom;
+mod uxrom;
+
 use alloc::vec::Vec;
+use alloc::{boxed::Box, vec};
 use libc_print::libc_println;
 
 use crate::{
     device::IOHandler,
     memory::{MemoryBus, MemoryRead, MemoryWrite},
+    ppu::{PpuHandler, Tile, TileSize},
 };
 
 const MAGIC_WORD: [u8; 4] = [0x4E, 0x45, 0x53, 0x1A];
 const PRG_ROM_BANK_SIZE: usize = 0x4000;
 const CHR_ROM_BANK_SIZE: usize = 0x2000;
 const PRG_RAM_BANK_SIZE: usize = 0x2000;
+
+pub trait Cartridge {
+    fn memory_read(&self, address: u16) -> MemoryRead;
+    fn memory_write(&mut self, address: u16, value: u8) -> MemoryWrite;
+    fn tile(&self, idx: usize, size: TileSize) -> Tile;
+    fn ppu_read(&self, address: u16) -> MemoryRead;
+    fn ppu_write(&mut self, address: u16, value: u8) -> MemoryWrite;
+}
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum Mirroring {
@@ -19,15 +32,14 @@ pub enum Mirroring {
     FourScreen,
 }
 
-pub struct Rom {
-    pub prg_rom: Vec<u8>,
-    pub chr_rom: Vec<u8>,
-    pub trainer: Vec<u8>,
-    pub prg_ram: Vec<u8>,
+pub struct RomInfo {
     pub mapper: u8,
     pub mirroring: Mirroring,
-    pub chr_ram: bool,
+    pub prg_rom_size: usize,
+    pub chr_rom_size: usize,
 }
+
+pub struct Rom(Box<dyn Cartridge>, RomInfo);
 
 impl Rom {
     pub fn new(raw: &Vec<u8>) -> Result<Self, ()> {
@@ -100,51 +112,61 @@ impl Rom {
         //     raw[prg_rom_start + prg_rom_size - 5]
         // );
 
-        Ok(Self {
-            prg_rom,
-            chr_rom,
-            prg_ram,
-            trainer,
+        let info = RomInfo {
             mapper,
             mirroring,
-            chr_ram,
-        })
+            prg_rom_size,
+            chr_rom_size,
+        };
+
+        match mapper {
+            0 => {
+                use nrom::Rom;
+                Ok(Self(
+                    Box::new(Rom::new(
+                        prg_rom, chr_rom, trainer, prg_ram, mirroring, chr_ram,
+                    )),
+                    info,
+                ))
+            }
+            2 => {
+                use uxrom::Rom;
+                Ok(Self(
+                    Box::new(Rom::new(
+                        prg_rom, chr_rom, trainer, prg_ram, mirroring, chr_ram,
+                    )),
+                    info,
+                ))
+            }
+            _ => Err(()),
+        }
+    }
+
+    pub fn info<'a>(&'a self) -> &'a RomInfo {
+        &self.1
     }
 }
 
 impl IOHandler for Rom {
     fn read(&mut self, mmu: &MemoryBus, address: u16) -> MemoryRead {
-        match address {
-            0x6000..0x8000 => {
-                if self.prg_ram.len() != 0 {
-                    MemoryRead::Value(self.prg_ram[(address - 0x6000) as usize])
-                } else {
-                    MemoryRead::Value(0)
-                }
-            }
-            0x8000..0xC000 => MemoryRead::Value(self.prg_rom[(address - 0x8000) as usize]),
-            0xC000..=0xFFFF => {
-                if self.prg_rom.len() <= PRG_ROM_BANK_SIZE {
-                    MemoryRead::Value(self.prg_rom[(address - 0xC000) as usize])
-                } else {
-                    MemoryRead::Value(self.prg_rom[(address - 0x8000) as usize])
-                }
-            }
-            _ => MemoryRead::Pass,
-        }
+        self.0.memory_read(address)
     }
 
     fn write(&mut self, mmu: &MemoryBus, address: u16, value: u8) -> MemoryWrite {
-        match address {
-            0x6000..0x8000 => {
-                if self.prg_ram.len() != 0 {
-                    self.prg_ram[(address - 0x6000) as usize] = value;
-                } else {
-                    self.chr_rom[(address - 0x6000) as usize] = value;
-                }
-                MemoryWrite::Value(value)
-            }
-            _ => MemoryWrite::Block,
-        }
+        self.0.memory_write(address, value)
+    }
+}
+
+impl PpuHandler for Rom {
+    fn tile(&self, idx: usize, size: TileSize) -> Tile {
+        self.0.tile(idx, size)
+    }
+
+    fn read(&self, address: u16) -> MemoryRead {
+        self.0.ppu_read(address)
+    }
+
+    fn write(&mut self, address: u16, value: u8) -> MemoryWrite {
+        self.0.ppu_write(address, value)
     }
 }

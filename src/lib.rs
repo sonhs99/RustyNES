@@ -7,7 +7,7 @@ extern crate alloc;
 
 use alloc::vec::Vec;
 use apu::Apu;
-pub use cartrige::Rom;
+pub use cartridge::Rom;
 use cpu::{Cpu2A03, Instruction};
 use device::Device;
 use hardware::HardwareHandle;
@@ -24,7 +24,7 @@ pub use ppu::frame::{Frame, HEIGHT, WIDTH};
 use crate::memory::Bus;
 
 mod apu;
-mod cartrige;
+mod cartridge;
 mod cpu;
 mod device;
 mod hardware;
@@ -53,11 +53,7 @@ impl Nes {
         let mut mmu = MemoryBus::new();
 
         let rom = Device::new(Rom::new(raw).unwrap());
-        let ppu = Device::new(Ppu::new(
-            rom.borrow().chr_rom.clone(),
-            rom.borrow().mirroring,
-            rom.borrow().chr_ram,
-        ));
+        let ppu = Device::new(Ppu::new(rom.handler(), rom.borrow().info().mirroring));
         let apu = Device::new(Apu::new());
 
         let pad = Device::new(Joypad::new());
